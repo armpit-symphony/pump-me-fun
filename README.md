@@ -7,14 +7,16 @@
 
 ## What It Does
 
-- Polls pump.fun for new tokens every 5 minutes
+- Polls pump.fun every 5 minutes
 - Filters for tokens 1-48 hours old with **$200k+ liquidity**
+- Detects **price momentum** (20%+ price rise)
+- Detects **liquidity growth** (50%+ increase)
 - Sends Telegram alert when a "gem" is found
-- Tracks seen tokens to avoid duplicates
+- Tracks token history to detect trends
 
 ## Use Case
 
-Find tokens that have built up liquidity but haven't pumped yet. Get early alerts to potentially buy before the crowd.
+Find tokens that have built up liquidity or showing early momentum — before the crowd jumps in.
 
 ## Quick Start
 
@@ -52,7 +54,7 @@ TELEGRAM_CHAT_ID = "your_chat_id"
 python scanner.py
 ```
 
-The scanner runs in the background, polling every 5 minutes. When a gem is found, you'll get a Telegram message.
+The scanner runs in the background. When a gem is found, you'll get a Telegram message.
 
 ### 5. Run in Background (optional)
 
@@ -60,25 +62,41 @@ The scanner runs in the background, polling every 5 minutes. When a gem is found
 nohup python scanner.py > scanner.log 2>&1 &
 ```
 
-## Configuration Options
+## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MIN_LIQUIDITY` | 200,000 | Minimum liquidity in USD |
-| `MAX_AGE_HOURS` | 48 | Max age of tokens to alert on |
+| `MAX_AGE_HOURS` | 48 | Max age of tokens to alert |
+| `MIN_AGE_HOURS` | 1 | Min age (avoid brand new) |
+| `MIN_PRICE_MOMENTUM` | 0.20 | Alert on 20%+ price rise |
+| `MIN_LIQUIDITY_GROWTH` | 1.5 | Alert on 50%+ liquidity growth |
 | `POLL_INTERVAL` | 300 | Seconds between checks |
-| `SEEN_TOKENS_FILE` | `seen_tokens.json` | File to track alerted tokens |
+
+## Indicators
+
+The scanner detects these signals:
+
+| Indicator | Description |
+|-----------|-------------|
+| 📈 Price Momentum | Price rose 20%+ since last check |
+| 💧 Liquidity Growth | Liquidity increased 50%+ |
+| 💎 High Liquidity | Liquidity exceeds $400k |
 
 ## Sample Alert
 
 ```
-💎 PUMP.FUN GEM FOUND
+💎 PUMP.FUN GEM ALERT
 
 MikeWayne (MIKE)
-Cg2c2kfuLv9xdrU...
+Cg2c2kfuLv9xdrUeokR4JGGm...
 
 💧 Liquidity: $530,000
-⏰ 2.5h old
+⏰ Age: 6.5h
+
+*Indicators:*
+  📈 Price +25%
+  💧 Liquidity +60%
 
 🔗 https://pump.fun/...
 ```
@@ -86,7 +104,7 @@ Cg2c2kfuLv9xdrU...
 ## Requirements
 
 - Python 3.10+
-- Moralis API key (free)
+- Moralis API key (free tier works)
 - Telegram bot token
 - Internet connection
 
@@ -94,7 +112,7 @@ Cg2c2kfuLv9xdrU...
 
 - **Moralis**: Free tier includes pump.fun API
 - **Telegram**: Free
-- **Hosting**: Your server (VPS, Raspberry Pi, etc.)
+- **Hosting**: Your server/VPS
 
 ## Disclaimer
 
