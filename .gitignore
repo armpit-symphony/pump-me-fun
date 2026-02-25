@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+
+# Local config
+seen_tokens.json
+scanner.log
+*.log
+
+# OS
+.DS_Store
