@@ -64,6 +64,7 @@ POLL_INTERVAL = 300      # Seconds between checks (5 min)
 MIN_PRICE_MOMENTUM = 0.20        # Alert on 20%+ price rise
 MIN_LIQUIDITY_GROWTH = 1.5       # Alert on 50%+ liquidity increase
 WEEKOLD_LIQUIDITY_MULTIPLIER = 2.0  # Alert on 2x liquidity for older tokens
+MIN_VOLUME_SPIKE = 5.0           # Alert on 5x+ transaction count increase
 
 # Storage
 BASE_DIR = Path(__file__).parent
@@ -115,6 +116,27 @@ def fetch_new_tokens(limit=100):
     resp.raise_for_status()
     return resp.json().get("result", [])
 
+def fetch_dexscreener_data(token_address):
+    """Fetch volume/txn data from DexScreener (free, no key needed)"""
+    try:
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+        resp = requests.get(url, timeout=10)
+        if resp.ok:
+            data = resp.json()
+            if data.get("pairs") and len(data["pairs"]) > 0:
+                pair = data["pairs"][0]
+                txns = pair.get("txns", {})
+                volume = pair.get("volume", {})
+                return {
+                    "txns_h1": (txns.get("h1", {}).get("buys", 0) + txns.get("h1", {}).get("sells", 0)),
+                    "txns_h24": (txns.get("h24", {}).get("buys", 0) + txns.get("h24", {}).get("sells", 0)),
+                    "volume_h1": volume.get("h1", 0),
+                    "volume_h24": volume.get("h24", 0)
+                }
+    except Exception as e:
+        logger.debug(f"DexScreener fetch failed for {token_address}: {e}")
+    return None
+
 def analyze_token(token, history, seen):
     """Analyze a single token for indicators"""
     addr = token.get("tokenAddress")
@@ -148,6 +170,9 @@ def analyze_token(token, history, seen):
     price_usd = token.get("priceUsd")
     current_price = float(price_usd) if price_usd else None
     
+    # Fetch DexScreener data for volume/txn detection
+    dex_data = fetch_dexscreener_data(addr)
+    
     indicators = []
     
     # Check price history for momentum
@@ -172,10 +197,28 @@ def analyze_token(token, history, seen):
             except:
                 pass
     
+    # Volume spike detection
+    if dex_data and addr in history:
+        prev_data = history.get(addr, {})
+        prev_txns = prev_data.get("txns_h1", 0)
+        current_txns = dex_data.get("txns_h1", 0)
+        
+        if prev_txns > 0 and current_txns > 0:
+            try:
+                txn_spike = current_txns / prev_txns
+                if txn_spike >= MIN_VOLUME_SPIKE:
+                    indicators.append(f"📊 Volume {txn_spike:.0f}x ({current_txns} txns/h)")
+            except:
+                pass
+    
+    # Build history record
     history[addr] = {
         "priceUsd": price_usd,
         "liquidity": liquidity,
         "name": token.get("name"),
+        "txns_h1": dex_data.get("txns_h1", 0) if dex_data else 0,
+        "txns_h24": dex_data.get("txns_h24", 0) if dex_data else 0,
+        "volume_h1": dex_data.get("volume_h1", 0) if dex_data else 0,
         "updated": datetime.now(timezone.utc).isoformat()
     }
     
@@ -184,7 +227,8 @@ def analyze_token(token, history, seen):
             "token": token,
             "indicators": indicators,
             "age_hours": age_hours,
-            "liquidity": liq
+            "liquidity": liq,
+            "dex_data": dex_data
         }
     
     return None
@@ -262,6 +306,7 @@ def main():
     logger.info(f"   Age Range: {MIN_AGE_HOURS}-{MAX_AGE_HOURS}h")
     logger.info(f"   Price Momentum: >{MIN_PRICE_MOMENTUM*100:.0f}%")
     logger.info(f"   Liquidity Growth: >{(MIN_LIQUIDITY_GROWTH-1)*100:.0f}%")
+    logger.info(f"   Volume Spike: >{MIN_VOLUME_SPIKE}x txns")
     logger.info(f"   Poll Interval: {POLL_INTERVAL}s")
     
     seen = load_seen_tokens()
