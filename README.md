@@ -1,6 +1,6 @@
 # 🚀 Pump Me Fun
 
- Telegram bot that monitors pump.fun for newly launched tokens with high liquidity — before they pump.
+A Telegram bot that monitors pump.fun for promising tokens before they pump. Get alerts when tokens show momentum or liquidity growth.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -8,15 +8,15 @@
 ## What It Does
 
 - Polls pump.fun every 5 minutes
-- Filters for tokens 1-48 hours old with **$200k+ liquidity**
+- Filters tokens by age (4h - 1 week) and liquidity ($20k+)
 - Detects **price momentum** (20%+ price rise)
 - Detects **liquidity growth** (50%+ increase)
-- Sends Telegram alert when a "gem" is found
-- Tracks token history to detect trends
+- Tracks **week-old tokens** with 2x liquidity
+- Sends Telegram alerts when gems are found
 
 ## Use Case
 
-Find tokens that have built up liquidity or showing early momentum — before the crowd jumps in.
+Find tokens that have built up liquidity and community interest — before the crowd jumps in. Get early alerts to research and potentially trade.
 
 ## Quick Start
 
@@ -27,30 +27,28 @@ git clone https://github.com/armpit-symphony/pump-me-fun.git
 cd pump-me-fun
 ```
 
-### 2. Install Dependencies
+### 2. Get API Keys
 
-```bash
-pip install requests
-```
+| Service | How to Get |
+|---------|------------|
+| **Moralis** | Sign up free at [moralis.io](https://moralis.io) |
+| **Telegram** | Message @BotFather to create a bot |
 
 ### 3. Configure
 
-Edit `scanner.py` and replace these values:
-
-```python
-# Get free API key at https://moralis.io
-MORALIS_API_KEY = "your_key_here"
-
-# Your Telegram bot token
-TELEGRAM_BOT_TOKEN = "your_bot_token"
-
-# Your Telegram chat ID
-TELEGRAM_CHAT_ID = "your_chat_id"
+```bash
+# Set environment variables
+export MORALIS_API_KEY="your_moralis_api_key"
+export TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
+export TELEGRAM_CHAT_ID="your_chat_id"
 ```
+
+Find your chat ID: Message @userinfobot on Telegram.
 
 ### 4. Run
 
 ```bash
+pip install requests
 python scanner.py
 ```
 
@@ -73,6 +71,8 @@ nohup python scanner.py > scanner.log 2>&1 &
 | `MIN_LIQUIDITY_GROWTH` | 1.5 | Alert on 50%+ liquidity growth |
 | `WEEKOLD_MULTIPLIER` | 2.0 | Alert on 2x liq for week-old |
 | `POLL_INTERVAL` | 300 | Seconds between checks |
+
+Edit the config section in `scanner.py` to customize.
 
 ## Indicators
 
@@ -113,7 +113,7 @@ Cg2c2kfuLv9xdrUeokR4JGGm...
 
 - **Moralis**: Free tier includes pump.fun API
 - **Telegram**: Free
-- **Hosting**: Your server/VPS
+- **Hosting**: Your server/VPS/Raspberry Pi
 
 ## Disclaimer
 

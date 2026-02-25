@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """
-Pump.fun Token Scanner v2
-Monitors pump.fun for gems with advanced indicators:
-- Liquidity > $200k
-- Age: 1-48 hours
-- Volume spike detection
-- Liquidity growth detection
+Pump.fun Token Scanner
+Monitors pump.fun for gems with advanced indicators.
+
+Features:
+- Liquidity & age filters
 - Price momentum detection
+- Liquidity growth tracking
+- Week-old token alerts
+- Telegram notifications
+
+Usage:
+    export MORALIS_API_KEY="your_key"
+    export TELEGRAM_BOT_TOKEN="your_bot_token"
+    export TELEGRAM_CHAT_ID="your_chat_id"
+    python scanner.py
 """
 
 import os
@@ -15,11 +23,11 @@ import json
 import time
 import requests
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Setup logging
-LOG_FILE = "/home/sparky/.openclaw/logs/pump-scanner.log"
+LOG_FILE = "scanner.log"
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -30,31 +38,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Config
-MORALIS_API_KEY = os.environ.get("MORALIS_API_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImE4M2Y3NTg0LWQ0MDItNGQzYi1hMDk5LWExZjYzNDYyMmU1NCIsIm9yZ0lkIjoiNTAyMjAyIiwidXNlcklkIjoiNTE2NzQwIiwidHlwZUlkIjoiMTcyODVmNDktYzA5Ni00ZjJiLTgwNWMtOTAwYjM0OWU1NDA2IiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3NzE5NzcyNTcsImV4cCI6NDkyNzczNzI1N30._W3ql0zZVWjvZJQTF-fZ2T_2jkhQoY2-T33evMvPb5c")
-TELEGRAM_BOT_TOKEN = "8675469476:AAF3A42e3eo5CD9IEMqtP46CJUV3T9HL3ko"
-TELEGRAM_CHAT_ID = "8585118112"
+# ============================================================
+# CONFIGURATION - Set via environment variables
+# ============================================================
 
-# Filters
-MIN_LIQUIDITY = 20_000  # $20k minimum
-MAX_AGE_HOURS = 168  # 1 week max (include older tokens)
-MIN_AGE_HOURS = 4  # At least 4 hours old - avoid brand new
-POLL_INTERVAL = 300  # 5 minutes
+# Required: Get free API key at https://moralis.io
+MORALIS_API_KEY = os.environ.get("MORALIS_API_KEY", "")
 
-# Advanced indicators
-MIN_PRICE_MOMENTUM = 0.20  # 20%+ price rise = alert
-MIN_LIQUIDITY_GROWTH = 1.5  # 50%+ liquidity increase = alert
-WEEKOLD_LIQUIDITY_MULTIPLIER = 2.0  # 2x liquidity = alert even if older
+# Required: Telegram bot token from @BotFather
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
-# Advanced indicators
-MIN_VOLUME_SPIKE = 3.0  # 3x average volume = alert
-MIN_LIQUIDITY_GROWTH = 1.5  # 50% liquidity increase = alert
-MIN_PRICE_MOMENTUM = 0.20  # 20% price rise = alert
+# Required: Your Telegram chat ID (use @userinfobot to find)
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# ============================================================
+# FILTERS - Customize these
+# ============================================================
+
+MIN_LIQUIDITY = 20_000   # Minimum liquidity in USD
+MAX_AGE_HOURS = 168      # Max age (1 week)
+MIN_AGE_HOURS = 4        # Min age to avoid brand new tokens
+POLL_INTERVAL = 300      # Seconds between checks (5 min)
+
+# Alert thresholds
+MIN_PRICE_MOMENTUM = 0.20        # Alert on 20%+ price rise
+MIN_LIQUIDITY_GROWTH = 1.5       # Alert on 50%+ liquidity increase
+WEEKOLD_LIQUIDITY_MULTIPLIER = 2.0  # Alert on 2x liquidity for older tokens
 
 # Storage
-BASE_DIR = Path("/home/sparky/.openclaw/workspace/pump-scanner")
+BASE_DIR = Path(__file__).parent
 SEEN_TOKENS_FILE = BASE_DIR / "seen_tokens.json"
 PRICE_HISTORY_FILE = BASE_DIR / "price_history.json"
+
 
 def load_json(file_path, default):
     try:
@@ -86,6 +101,11 @@ def save_price_history(history):
     save_json(PRICE_HISTORY_FILE, history)
 
 def fetch_new_tokens(limit=100):
+    """Fetch new tokens from Moralis API"""
+    if not MORALIS_API_KEY:
+        logger.error("MORALIS_API_KEY not set!")
+        return []
+    
     url = f"https://solana-gateway.moralis.io/token/mainnet/exchange/pumpfun/new?limit={limit}"
     headers = {
         "accept": "application/json",
@@ -96,14 +116,12 @@ def fetch_new_tokens(limit=100):
     return resp.json().get("result", [])
 
 def analyze_token(token, history, seen):
-    """Advanced analysis for a single token"""
+    """Analyze a single token for indicators"""
     addr = token.get("tokenAddress")
     
-    # Skip if already alerted
     if addr in seen:
         return None
     
-    # Basic filters
     created = token.get("createdAt")
     if not created:
         return None
@@ -112,13 +130,11 @@ def analyze_token(token, history, seen):
         created_dt = datetime.fromisoformat(created.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
         age_hours = (datetime.now(timezone.utc) - created_dt).total_seconds() / 3600
         
-        # Age filter: must be 1-48 hours old
         if age_hours < MIN_AGE_HOURS or age_hours > MAX_AGE_HOURS:
             return None
     except:
         return None
     
-    # Liquidity filter
     liquidity = token.get("liquidity")
     if liquidity is None:
         return None
@@ -129,23 +145,12 @@ def analyze_token(token, history, seen):
     except:
         return None
     
-    # Note: Holder count requires separate API call - skipping for speed
-    # Moralis has endpoint for token holders but would slow down polling
-    
-    # Get price data
     price_usd = token.get("priceUsd")
-    if price_usd:
-        try:
-            current_price = float(price_usd)
-        except:
-            current_price = None
-    else:
-        current_price = None
+    current_price = float(price_usd) if price_usd else None
     
-    # Check for indicators
     indicators = []
     
-    # 1. Check price history for momentum
+    # Check price history for momentum
     if addr in history and current_price:
         prev_data = history[addr]
         prev_price = prev_data.get("priceUsd")
@@ -156,21 +161,17 @@ def analyze_token(token, history, seen):
                 price_change = (current_price - float(prev_price)) / float(prev_price)
                 liquidity_change = float(liquidity) / float(prev_liquidity)
                 
-                # Price momentum indicator
                 if price_change >= MIN_PRICE_MOMENTUM:
                     indicators.append(f"📈 Price +{price_change*100:.0f}%")
                 
-                # Liquidity growth indicator
                 if liquidity_change >= MIN_LIQUIDITY_GROWTH:
                     indicators.append(f"💧 Liquidity +{(liquidity_change-1)*100:.0f}%")
                 
-                # Week-old token with 2x liquidity = strong signal
                 if age_hours >= 24 and liquidity_change >= WEEKOLD_LIQUIDITY_MULTIPLIER:
                     indicators.append(f"🗓️ Week-old 2x Liquidity")
             except:
                 pass
     
-    # Update history
     history[addr] = {
         "priceUsd": price_usd,
         "liquidity": liquidity,
@@ -178,8 +179,6 @@ def analyze_token(token, history, seen):
         "updated": datetime.now(timezone.utc).isoformat()
     }
     
-    # Only alert on momentum or significant liquidity growth
-    # This reduces spam from new tokens
     if indicators:
         return {
             "token": token,
@@ -200,12 +199,15 @@ def filter_gems(tokens, seen):
         if result:
             gems.append(result)
     
-    # Save updated history
     save_price_history(history)
-    
     return gems
 
 def send_telegram(message):
+    """Send alert to Telegram"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("Telegram not configured - skipping alert")
+        return False
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -220,6 +222,7 @@ def send_telegram(message):
         return False
 
 def format_alert(gem):
+    """Format Telegram alert message"""
     token = gem["token"]
     indicators = gem["indicators"]
     
@@ -245,7 +248,16 @@ def format_alert(gem):
 🔗 https://pump.fun/{addr}"""
 
 def main():
-    logger.info("🚀 Pump.fun Scanner v2 Starting...")
+    # Validate config
+    if not MORALIS_API_KEY:
+        logger.error("Please set MORALIS_API_KEY environment variable")
+        logger.info("Get free key at: https://moralis.io")
+        sys.exit(1)
+    
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("Telegram not configured - alerts disabled")
+    
+    logger.info("🚀 Pump.fun Scanner Starting...")
     logger.info(f"   Min Liquidity: ${MIN_LIQUIDITY:,}")
     logger.info(f"   Age Range: {MIN_AGE_HOURS}-{MAX_AGE_HOURS}h")
     logger.info(f"   Price Momentum: >{MIN_PRICE_MOMENTUM*100:.0f}%")
