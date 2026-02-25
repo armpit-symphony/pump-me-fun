@@ -36,10 +36,15 @@ TELEGRAM_BOT_TOKEN = "8675469476:AAF3A42e3eo5CD9IEMqtP46CJUV3T9HL3ko"
 TELEGRAM_CHAT_ID = "8585118112"
 
 # Filters
-MIN_LIQUIDITY = 5_000  # $5k - catch tokens above starting liquidity
+MIN_LIQUIDITY = 20_000  # $20k - reduce spam
 MAX_AGE_HOURS = 48
-MIN_AGE_HOURS = 0  # Catch fresh tokens as soon as they have liquidity
+MIN_AGE_HOURS = 0  # Fresh tokens ok
 POLL_INTERVAL = 300  # 5 minutes
+
+# Advanced indicators (require these to alert)
+MIN_PRICE_MOMENTUM = 0.20  # 20%+ price rise = alert
+MIN_LIQUIDITY_GROWTH = 1.5  # 50%+ liquidity increase = alert
+MIN_HOLDERS_NOTE = "Requires Moralis Pro - not available on free tier"
 
 # Advanced indicators
 MIN_VOLUME_SPIKE = 3.0  # 3x average volume = alert
@@ -169,19 +174,12 @@ def analyze_token(token, history, seen):
         "updated": datetime.now(timezone.utc).isoformat()
     }
     
-    # Always include token if it passes filters (even without indicators)
-    # This catches new gems that haven't momentum'd yet
+    # Only alert on momentum or significant liquidity growth
+    # This reduces spam from new tokens
     if indicators:
         return {
             "token": token,
             "indicators": indicators,
-            "age_hours": age_hours,
-            "liquidity": liq
-        }
-    elif liq >= MIN_LIQUIDITY:  # Has decent liquidity even without momentum
-        return {
-            "token": token,
-            "indicators": [f"💎 New Token: \${liq:,.0f} liquidity"],
             "age_hours": age_hours,
             "liquidity": liq
         }
