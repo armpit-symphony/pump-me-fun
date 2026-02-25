@@ -36,9 +36,9 @@ TELEGRAM_BOT_TOKEN = "8675469476:AAF3A42e3eo5CD9IEMqtP46CJUV3T9HL3ko"
 TELEGRAM_CHAT_ID = "8585118112"
 
 # Filters
-MIN_LIQUIDITY = 200_000  # $200k
+MIN_LIQUIDITY = 5_000  # $5k - catch tokens above starting liquidity
 MAX_AGE_HOURS = 48
-MIN_AGE_HOURS = 1  # Must be at least 1 hour old
+MIN_AGE_HOURS = 0  # Catch fresh tokens as soon as they have liquidity
 POLL_INTERVAL = 300  # 5 minutes
 
 # Advanced indicators
@@ -124,6 +124,9 @@ def analyze_token(token, history, seen):
     except:
         return None
     
+    # Note: Holder count requires separate API call - skipping for speed
+    # Moralis has endpoint for token holders but would slow down polling
+    
     # Get price data
     price_usd = token.get("priceUsd")
     if price_usd:
@@ -166,7 +169,8 @@ def analyze_token(token, history, seen):
         "updated": datetime.now(timezone.utc).isoformat()
     }
     
-    # Always include basic gem if it passes filters
+    # Always include token if it passes filters (even without indicators)
+    # This catches new gems that haven't momentum'd yet
     if indicators:
         return {
             "token": token,
@@ -174,10 +178,10 @@ def analyze_token(token, history, seen):
             "age_hours": age_hours,
             "liquidity": liq
         }
-    elif liq >= MIN_LIQUIDITY * 2:  # Extra high liquidity = alert anyway
+    elif liq >= MIN_LIQUIDITY:  # Has decent liquidity even without momentum
         return {
             "token": token,
-            "indicators": [f"💎 High Liquidity: ${liq:,.0f}"],
+            "indicators": [f"💎 New Token: \${liq:,.0f} liquidity"],
             "age_hours": age_hours,
             "liquidity": liq
         }
