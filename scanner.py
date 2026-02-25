@@ -36,15 +36,15 @@ TELEGRAM_BOT_TOKEN = "8675469476:AAF3A42e3eo5CD9IEMqtP46CJUV3T9HL3ko"
 TELEGRAM_CHAT_ID = "8585118112"
 
 # Filters
-MIN_LIQUIDITY = 20_000  # $20k - reduce spam
-MAX_AGE_HOURS = 48
-MIN_AGE_HOURS = 0  # Fresh tokens ok
+MIN_LIQUIDITY = 20_000  # $20k minimum
+MAX_AGE_HOURS = 168  # 1 week max (include older tokens)
+MIN_AGE_HOURS = 4  # At least 4 hours old - avoid brand new
 POLL_INTERVAL = 300  # 5 minutes
 
-# Advanced indicators (require these to alert)
+# Advanced indicators
 MIN_PRICE_MOMENTUM = 0.20  # 20%+ price rise = alert
 MIN_LIQUIDITY_GROWTH = 1.5  # 50%+ liquidity increase = alert
-MIN_HOLDERS_NOTE = "Requires Moralis Pro - not available on free tier"
+WEEKOLD_LIQUIDITY_MULTIPLIER = 2.0  # 2x liquidity = alert even if older
 
 # Advanced indicators
 MIN_VOLUME_SPIKE = 3.0  # 3x average volume = alert
@@ -163,6 +163,10 @@ def analyze_token(token, history, seen):
                 # Liquidity growth indicator
                 if liquidity_change >= MIN_LIQUIDITY_GROWTH:
                     indicators.append(f"💧 Liquidity +{(liquidity_change-1)*100:.0f}%")
+                
+                # Week-old token with 2x liquidity = strong signal
+                if age_hours >= 24 and liquidity_change >= WEEKOLD_LIQUIDITY_MULTIPLIER:
+                    indicators.append(f"🗓️ Week-old 2x Liquidity")
             except:
                 pass
     

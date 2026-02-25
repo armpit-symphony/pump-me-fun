@@ -66,11 +66,12 @@ nohup python scanner.py > scanner.log 2>&1 &
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MIN_LIQUIDITY` | 200,000 | Minimum liquidity in USD |
-| `MAX_AGE_HOURS` | 48 | Max age of tokens to alert |
-| `MIN_AGE_HOURS` | 1 | Min age (avoid brand new) |
+| `MIN_LIQUIDITY` | 20,000 | Minimum liquidity in USD |
+| `MAX_AGE_HOURS` | 168 | Max age (1 week) |
+| `MIN_AGE_HOURS` | 4 | Min age to avoid brand new |
 | `MIN_PRICE_MOMENTUM` | 0.20 | Alert on 20%+ price rise |
 | `MIN_LIQUIDITY_GROWTH` | 1.5 | Alert on 50%+ liquidity growth |
+| `WEEKOLD_MULTIPLIER` | 2.0 | Alert on 2x liq for week-old |
 | `POLL_INTERVAL` | 300 | Seconds between checks |
 
 ## Indicators
@@ -81,7 +82,7 @@ The scanner detects these signals:
 |-----------|-------------|
 | 📈 Price Momentum | Price rose 20%+ since last check |
 | 💧 Liquidity Growth | Liquidity increased 50%+ |
-| 💎 High Liquidity | Liquidity exceeds $400k |
+| 🗓️ Week-old 2x | Token 1+ week old with 2x liquidity |
 
 ## Sample Alert
 
