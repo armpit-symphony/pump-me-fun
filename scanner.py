@@ -47,7 +47,8 @@ TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 # ============================================================
 
 MIN_LIQUIDITY    = 20_000   # Minimum liquidity in USD
-MAX_AGE_HOURS    = 168      # Max token age (1 week)
+MAX_LIQUIDITY    = 100_000  # Max liquidity in USD (keep early)
+MAX_AGE_HOURS    = 72       # Max token age (3 days)
 MIN_AGE_HOURS    = 4        # Ignore brand-new tokens
 POLL_INTERVAL    = 300      # Seconds between scans (5 min)
 FETCH_LIMIT      = 100      # How many tokens to pull per scan (Moralis max is 100)
@@ -58,12 +59,19 @@ MIN_LIQUIDITY_GROWTH      = 1.5    # Alert on 50%+ liquidity increase
 WEEKOLD_LIQ_MULTIPLIER    = 2.0    # Alert on 2x liquidity for tokens 7d+
 MIN_VOLUME_SPIKE          = 5.0    # Alert on 5x transaction count spike
 MIN_TXNS_FOR_SPIKE        = 10     # Ignore spikes if previous txn count was tiny (noise filter)
+MIN_LIQ_GROWTH_24H         = 1.5    # 24h liquidity growth gate for 24h+ tokens
 
 # Re-alert same token after this many hours (0 = never re-alert)
 REALERT_HOURS = 6
 
+# Cap alerts per token per day
+MAX_ALERTS_PER_TOKEN_PER_DAY = 10
+
 # Clean up price history records older than this
 HISTORY_MAX_AGE_HOURS = 200
+
+# Friday summary (UTC)
+SUMMARY_HOUR_UTC = 16  # 16:00 UTC Friday
 
 # ============================================================
 # STORAGE
@@ -72,6 +80,9 @@ HISTORY_MAX_AGE_HOURS = 200
 BASE_DIR           = Path(__file__).parent
 SEEN_TOKENS_FILE   = BASE_DIR / "seen_tokens.json"
 PRICE_HISTORY_FILE = BASE_DIR / "price_history.json"
+ALERT_COUNTS_FILE  = BASE_DIR / "alert_counts.json"
+ALERT_LOG_FILE     = BASE_DIR / "alert_log.json"
+SUMMARY_STATE_FILE = BASE_DIR / "summary_state.json"
 
 
 def load_json(file_path, default):
@@ -114,6 +125,30 @@ def save_price_history(history: dict):
     save_json(PRICE_HISTORY_FILE, history)
 
 
+def load_alert_counts():
+    return load_json(ALERT_COUNTS_FILE, {})
+
+
+def save_alert_counts(counts: dict):
+    save_json(ALERT_COUNTS_FILE, counts)
+
+
+def load_alert_log():
+    return load_json(ALERT_LOG_FILE, [])
+
+
+def save_alert_log(entries: list):
+    save_json(ALERT_LOG_FILE, entries)
+
+
+def load_summary_state():
+    return load_json(SUMMARY_STATE_FILE, {})
+
+
+def save_summary_state(state: dict):
+    save_json(SUMMARY_STATE_FILE, state)
+
+
 def prune_price_history(history: dict) -> dict:
     """Remove stale entries to keep the file from growing forever."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=HISTORY_MAX_AGE_HOURS)
@@ -148,6 +183,37 @@ def should_alert(seen: dict, addr: str) -> bool:
         return (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600 >= REALERT_HOURS
     except Exception:
         return True
+
+
+def _today_key():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def can_alert_today(alert_counts: dict, addr: str) -> bool:
+    today = _today_key()
+    entry = alert_counts.get(addr)
+    if not entry or entry.get("date") != today:
+        return True
+    return int(entry.get("count", 0)) < MAX_ALERTS_PER_TOKEN_PER_DAY
+
+
+def bump_alert_count(alert_counts: dict, addr: str):
+    today = _today_key()
+    entry = alert_counts.get(addr)
+    if not entry or entry.get("date") != today:
+        alert_counts[addr] = {"date": today, "count": 1}
+    else:
+        entry["count"] = int(entry.get("count", 0)) + 1
+
+
+def record_alert(alert_log: list, token: dict, liquidity: float):
+    alert_log.append({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "addr": token.get("tokenAddress"),
+        "name": token.get("name"),
+        "symbol": token.get("symbol"),
+        "liquidity": liquidity,
+    })
 
 
 # ============================================================
@@ -279,6 +345,8 @@ def analyze_token(token: dict, history: dict, seen: dict):
         liq = float(token.get("liquidity") or 0)
         if liq < MIN_LIQUIDITY:
             return None
+        if liq > MAX_LIQUIDITY:
+            return None
     except Exception:
         return None
 
@@ -311,6 +379,26 @@ def analyze_token(token: dict, history: dict, seen: dict):
             except Exception:
                 pass
 
+    # --- 24h liquidity growth gate (if we have 24h history and age >= 24h) ---
+    liq_24h_ratio = None
+    hist_samples = history.get(addr, {}).get("samples", [])
+    if age_hours >= 24 and hist_samples:
+        cutoff_ts = time.time() - 24 * 3600
+        old_samples = [s for s in hist_samples if s.get("ts", 0) <= cutoff_ts]
+        if old_samples:
+            # Use the most recent sample that is >= 24h old
+            old_sample = old_samples[-1]
+            try:
+                old_liq = float(old_sample.get("liquidity") or 0)
+                if old_liq > 0:
+                    liq_24h_ratio = liq / old_liq
+            except Exception:
+                liq_24h_ratio = None
+        if liq_24h_ratio is not None and liq_24h_ratio >= MIN_LIQ_GROWTH_24H:
+            indicators.append(f"💧 24h Liq +{(liq_24h_ratio-1)*100:.0f}%")
+        elif liq_24h_ratio is not None and liq_24h_ratio < MIN_LIQ_GROWTH_24H:
+            return None
+
     # --- Volume / txn spike (only fetch DexScreener when we have history) ---
     dex_data = None
     if addr in history:
@@ -328,14 +416,28 @@ def analyze_token(token: dict, history: dict, seen: dict):
                     pass
 
     # Update history record
+    prev_hist = history.get(addr, {})
+    samples = prev_hist.get("samples", [])
+    if not isinstance(samples, list):
+        samples = []
+    samples.append({
+        "ts": time.time(),
+        "priceUsd": price_usd,
+        "liquidity": str(liq),
+    })
+    # Keep last ~7 days of samples (cap list size for safety)
+    cutoff_ts = time.time() - (7 * 24 * 3600)
+    samples = [s for s in samples if s.get("ts", 0) >= cutoff_ts][-500:]
+
     history[addr] = {
         "priceUsd":   price_usd,
         "liquidity":  str(liq),
         "name":       token.get("name"),
-        "txns_h1":    dex_data.get("txns_h1", 0) if dex_data else history.get(addr, {}).get("txns_h1", 0),
-        "txns_h24":   dex_data.get("txns_h24", 0) if dex_data else 0,
-        "volume_h1":  dex_data.get("volume_h1", 0) if dex_data else 0,
+        "txns_h1":    dex_data.get("txns_h1", 0) if dex_data else prev_hist.get("txns_h1", 0),
+        "txns_h24":   dex_data.get("txns_h24", 0) if dex_data else prev_hist.get("txns_h24", 0),
+        "volume_h1":  dex_data.get("volume_h1", 0) if dex_data else prev_hist.get("volume_h1", 0),
         "updated":    datetime.now(timezone.utc).isoformat(),
+        "samples":    samples,
     }
 
     if indicators:
@@ -422,6 +524,9 @@ def main():
     logger.info(f"   Re-alert window: {REALERT_HOURS}h   Poll: {POLL_INTERVAL}s")
 
     seen = load_seen_tokens()
+    alert_counts = load_alert_counts()
+    alert_log = load_alert_log()
+    summary_state = load_summary_state()
     logger.info(f"   Loaded {len(seen)} previously-seen tokens")
 
     while True:
@@ -439,13 +544,52 @@ def main():
 
                 logger.info(f"   🚨 ALERT: {name}")
 
+                if not can_alert_today(alert_counts, addr):
+                    logger.info(f"   ⏳ Daily alert cap reached for {name}")
+                    continue
+
                 if send_telegram(msg):
                     seen[addr] = datetime.now(timezone.utc).isoformat()
+                    bump_alert_count(alert_counts, addr)
+                    record_alert(alert_log, gem["token"], gem["liquidity"])
                     logger.info(f"   ✅ Alert sent for {name}")
                 else:
                     logger.error(f"   ❌ Alert FAILED for {name}")
 
             save_seen_tokens(seen)
+            save_alert_counts(alert_counts)
+            save_alert_log(alert_log)
+
+            # Weekly Friday summary (UTC)
+            now_utc = datetime.now(timezone.utc)
+            if now_utc.weekday() == 4 and now_utc.hour >= SUMMARY_HOUR_UTC:
+                last_summary = summary_state.get("last_summary_date")
+                today = _today_key()
+                if last_summary != today:
+                    # Build last 7d summary
+                    cutoff = now_utc - timedelta(days=7)
+                    recent = [
+                        e for e in alert_log
+                        if datetime.fromisoformat(e.get("ts")).replace(tzinfo=timezone.utc) >= cutoff
+                    ]
+                    counts = {}
+                    for e in recent:
+                        key = e.get("addr")
+                        if not key:
+                            continue
+                        counts.setdefault(key, {"count": 0, "name": e.get("name"), "symbol": e.get("symbol")})
+                        counts[key]["count"] += 1
+                    top = sorted(counts.values(), key=lambda x: x["count"], reverse=True)[:10]
+                    lines = ["📊 *Weekly Pump.fun Summary (7d)*", f"Total alerts: {len(recent)}"]
+                    if top:
+                        lines.append("")
+                        for t in top:
+                            label = t.get("name") or t.get("symbol") or "Unknown"
+                            sym = t.get("symbol") or ""
+                            lines.append(f"• {label} {f'({sym})' if sym else ''}: {t['count']}")
+                    send_telegram("\n".join(lines))
+                    summary_state["last_summary_date"] = today
+                    save_summary_state(summary_state)
 
         except Exception as e:
             logger.exception(f"Unexpected error in main loop: {e}")

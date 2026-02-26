@@ -9,11 +9,12 @@ A Telegram bot that monitors pump.fun for promising tokens before they pump. Get
 
 - Polls pump.fun every 5 minutes (configurable)
 - Fetches up to 100 tokens per scan via Moralis
-- Filters tokens by age (4h–1 week) and liquidity ($20k+)
+- Filters tokens by age (4h–72h) and liquidity ($20k–$100k)
 - Detects **price momentum** (20%+ price rise since last check)
 - Detects **liquidity growth** (50%+ increase since last check)
 - Detects **volume spikes** (5x+ transaction count increase)
-- Tracks **week-old tokens** (168h+) with 2x liquidity
+- Enforces **24h liquidity growth** for 24h+ tokens
+- Weekly Friday summary report
 - Sends Telegram alerts with retry logic when gems are found
 - Re-alerts on the same token after 6 hours if it keeps pumping
 - Auto-prunes price history to keep disk usage low
@@ -75,17 +76,21 @@ Edit the config section at the top of `scanner.py`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MIN_LIQUIDITY` | 20,000 | Minimum liquidity in USD |
-| `MAX_AGE_HOURS` | 168 | Max age (1 week) |
+| `MAX_LIQUIDITY` | 100,000 | Maximum liquidity in USD |
+| `MAX_AGE_HOURS` | 72 | Max age (3 days) |
 | `MIN_AGE_HOURS` | 4 | Min age to avoid brand new tokens |
 | `POLL_INTERVAL` | 300 | Seconds between scans |
 | `FETCH_LIMIT` | 100 | Tokens fetched per scan (Moralis max is 100) |
 | `MIN_PRICE_MOMENTUM` | 0.20 | Alert on 20%+ price rise |
 | `MIN_LIQUIDITY_GROWTH` | 1.5 | Alert on 50%+ liquidity growth |
+| `MIN_LIQ_GROWTH_24H` | 1.5 | Require 24h liq growth for 24h+ tokens |
 | `WEEKOLD_LIQ_MULTIPLIER` | 2.0 | Alert on 2x liq for 7d+ tokens |
 | `MIN_VOLUME_SPIKE` | 5.0 | Alert on 5x transaction spike |
 | `MIN_TXNS_FOR_SPIKE` | 10 | Min previous txns before spike counts (noise filter) |
 | `REALERT_HOURS` | 6 | Re-alert same token after N hours (0 = never) |
+| `MAX_ALERTS_PER_TOKEN_PER_DAY` | 10 | Daily per-token alert cap |
 | `HISTORY_MAX_AGE_HOURS` | 200 | Prune history entries older than this |
+| `SUMMARY_HOUR_UTC` | 16 | Friday summary hour (UTC) |
 
 ## Indicators
 
