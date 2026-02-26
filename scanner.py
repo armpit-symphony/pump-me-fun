@@ -50,7 +50,7 @@ MIN_LIQUIDITY    = 20_000   # Minimum liquidity in USD
 MAX_AGE_HOURS    = 168      # Max token age (1 week)
 MIN_AGE_HOURS    = 4        # Ignore brand-new tokens
 POLL_INTERVAL    = 300      # Seconds between scans (5 min)
-FETCH_LIMIT      = 200      # How many tokens to pull per scan (max Moralis allows)
+FETCH_LIMIT      = 100      # How many tokens to pull per scan (Moralis max is 100)
 
 # Alert thresholds
 MIN_PRICE_MOMENTUM        = 0.20   # Alert on 20%+ price rise
